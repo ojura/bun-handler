@@ -1,39 +1,37 @@
 #!/usr/bin/env python3
-"""
-Standalone adversarial test harness for util/bun_handler.py.
+"""Synthetic and runtime tests for bun_handler.py.
 
-The real-binary gates exercise the supported linux-x64 Claude artifact through
-public APIs (`extract_js`, `repack_with_js`, `repack_unchanged`, `can_handle`,
-`detect_format`). Synthetic fixtures additionally call lower-level helpers so
-malformed ownership, optional-tail pointers, alignment, and ELF geometry can be
-constructed directly.
+Runtime checks exercise supported Linux and Windows x64 Claude Code executables
+through the public APIs (`extract_js`, `repack_with_js`, `repack_unchanged`,
+`can_handle`, `detect_format`). Running Windows executables on Linux requires
+Wine. Synthetic fixtures call lower-level helpers to construct malformed regions,
+optional-record pointers, alignment and container geometry.
 
-Real-binary gates (skipped cleanly when no native binary is available):
-  1. Byte-exact no-op identity.
-  2. Length-growing source patch runs and is visible.
-  3. Deterministic output for identical input and edit.
-  5. Length-shrinking source patch round-trips and remains patchable.
-  6. Multiple source modules edited in one public-API repack.
-  7. Equal-length control-flow edit changes runtime output.
-  8. Equal-length string-literal edit changes runtime output.
-  9. A newly inserted dependency (ESM static import or CJS require) is parsed
-     and rejected instead of being hidden by stale compiled state.
+Runtime checks are skipped when an executable is unavailable:
+  1. Repacking unchanged source preserves every byte.
+  2. A source edit that grows the file runs and produces the expected output.
+  3. Identical input and edits produce identical output bytes.
+  5. A source edit that shrinks the file round-trips and remains patchable.
+  6. Several source modules can be edited in one public-API repack.
+  7. An equal-length control-flow edit changes runtime output.
+  8. An equal-length string-literal edit changes runtime output.
+  9. An inserted dependency (ESM static import or CJS require) is parsed and
+     rejected instead of being hidden by stale compiled state.
 
-Gates 7-9 are the stale-compiled-state regression proof: changed modules must
-have their source hash, bytecode, module-info, and sourcemap pointers detached.
-Gate 4 and the synthetic suite always run. They cover 36/52-byte records,
-4/8-byte section headers, current flag-ordered optional records, grow/shrink and
-multi-edit remapping, ownership/terminator/discriminant checks, bytecode and
-UTF-16 alignment, x86-64 scope, and fail-closed ELF mapping geometry.
+Checks 7 through 9 detect stale compiled state: changed modules must have their
+source hash, bytecode, module-info and sourcemap pointers detached. Check 4 and
+the synthetic suite always run. They test 36/52-byte records, 4/8-byte section
+headers, optional records in flag order, pointer updates after edits, region
+boundaries, terminators, enum values, bytecode and UTF-16 alignment, and ELF
+mapping constraints.
 
-Binary discovery, first hit wins:
-  - CLAUDE_NATIVE_BINARY environment variable,
-  - first file-valued CLI argument,
-  - highest version under ~/.local/share/claude/versions.
+The runner chooses the binary from these sources, in order:
+  - CLAUDE_NATIVE_BINARY environment variable;
+  - the explicitly supplied CLI argument;
+  - the highest version under ~/.local/share/claude/versions.
 
-Exit code is 0 only when every executed check passes. A skipped real gate is
-permissive by default and can be promoted to failure with
-CLAUDE_PFG_STRICT_GATES=gateN[,gateN...].
+Exit code is 0 only when every executed check passes. A skipped runtime check
+can be treated as a failure with CLAUDE_PFG_STRICT_GATES=gateN[,gateN...].
 """
 import glob
 import os
