@@ -1,12 +1,15 @@
-# bun_handler
+# bun-handler
 
 `bun_handler.py` reads and rewrites the JavaScript inside Claude Code's native
 executables, which `bun build --compile` produces. It uses only the Python
 standard library (`hashlib`, `os`, `struct`, `subprocess`, `sys`, `tempfile`).
-Every other file in this directory tests or validates it.
+The repository also includes synthetic tests and runtime validation scripts.
 
-Scripts in `util/` and `hooks/` import it after adding this directory to
-`sys.path`.
+```sh
+git clone https://github.com/ojura/bun-handler.git
+cd bun-handler
+python3 bun_handler.py modules --strict /path/to/claude
+```
 
 ## Command line
 
@@ -55,13 +58,33 @@ changed since extraction. `split_extracted_js()`, `changed_js_modules()` and
 `repack_module_sources()` work on individual modules.
 
 `BunImage(data).source_modules()` lists the JavaScript module records, and
-`read_source(record)` gives a module's source as strict UTF-8. `pfg/bundle.py`
-reads Claude Code's modules this way, and cc-env-overrides builds its catalog
-from what pfg reads. A change to how this handler decodes module sources (the
-three storage encodings, single-module builds, module identity) changes what pfg
-extracts, so the commit that makes it must also raise the number in
-`pfg/REVISION`. cc-env-overrides then rebuilds every catalog made before the
-change.
+`read_source(record)` gives a module's source as strict UTF-8.
+
+## Use as a submodule
+
+```sh
+git submodule add https://github.com/ojura/bun-handler.git bun-handler
+```
+
+Existing checkouts initialize it with `git submodule update --init --recursive`.
+A script in the superproject root can import the reader like this:
+
+```python
+from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "bun-handler"))
+import bun_handler
+```
+
+### Catalog integration
+
+[claude-patches](https://github.com/ojura/claude-patches)'s `pfg/bundle.py`
+reads module sources through this API. cc-env-overrides builds its catalog from
+what pfg reads. When a change to source decoding (storage encodings,
+single-module builds or module identity) changes what pfg extracts, the
+claude-patches commit that updates its `bun-handler` submodule must also raise
+`pfg/REVISION`. cc-env-overrides then rebuilds catalogs made before the change.
 
 ## Accepted executables
 
@@ -165,9 +188,10 @@ of the supplied executable. The synthetic tests cover ELF and PE, both wrapper
 sizes and module-record sizes, malformed descriptors and entries, and edits
 that move the payload.
 
-`pfg/REVISION` remains 9: this adds an executable layout the reader previously
-refused and leaves source decoding unchanged. Extraction from 2.1.304, 2.1.305
-and 2.1.309 matches the reader before this addition.
+The corresponding claude-patches integration keeps `pfg/REVISION` at 9:
+linked-bytecode support adds an executable layout and leaves source decoding
+unchanged. Extraction from 2.1.304, 2.1.305 and 2.1.309 matches the reader before
+this addition.
 
 ## Repairing other tools' output
 
@@ -205,27 +229,35 @@ than its snap launcher. Point the six uppercase/lowercase HTTP, HTTPS and ALL
 proxy variables at the closed loopback port. Trace `execve`, `connect`, `sendto`,
 `sendmsg` and `sendmmsg` with `strace -f --seccomp-bpf` and inspect the results.
 
+From the repository root:
+
 ```sh
 # 380 synthetic tests using in-memory executable fixtures.
-python3 -m unittest discover -s bun_handler -v
-
-# 130 synthetic checks plus the gates on a real binary. The gates run patched
-# copies of it. CLAUDE_PFG_STRICT_GATES=gate1,gate2,... turns a skipped gate into
-# a failure. `bun_handler.py selftest <binary>` runs this harness after its
-# byte-stability checks.
-python3 bun_handler/test_bun_handler.py /path/to/disposable-claude-copy
-
-# Additional runtime checks for linked bytecode, in the same isolated environment.
-python3 bun_handler/validate_linked_bytecode.py /path/to/disposable-claude-copy
-
-# Randomized ELF, PE and new-record fixtures.
-python3 bun_handler/property_probe.py bun_handler
-python3 bun_handler/pe_property_probe.py bun_handler
-python3 bun_handler/run_review_probe.py property --fixtures 1200
+python3 -I -B -m unittest discover -s . -v
 ```
 
-Run the probes from a disposable working directory: a failed run keeps its
-fixtures in a `review-property-failure-*` directory there.
+In the isolated environment described above, from `/`:
+
+```sh
+# 130 synthetic checks and runtime checks on patched copies of the binary.
+# CLAUDE_PFG_STRICT_GATES=gate1,gate2,... turns a skipped check into a failure.
+# bun_handler.py selftest also runs these checks.
+python3 /path/to/bun-handler/test_bun_handler.py /path/to/disposable-claude-copy
+
+# Additional runtime checks for linked bytecode.
+python3 /path/to/bun-handler/validate_linked_bytecode.py /path/to/disposable-claude-copy
+```
+
+For randomized checks, set `handler` to the absolute clone path and run from a
+disposable working directory. A failed run keeps its fixtures in a
+`review-property-failure-*` directory there.
+
+```sh
+handler=/path/to/bun-handler
+python3 -I -B "$handler/property_probe.py" "$handler"
+python3 -I -B "$handler/pe_property_probe.py" "$handler"
+python3 -I -B "$handler/run_review_probe.py" property --fixtures 1200
+```
 
 The `validate_*.py` scripts, `extra_windows_runtime.py`, `audit_pe_storage.py`
 and `run_review_probe.py runtime` check edited binaries at run time. Some need
